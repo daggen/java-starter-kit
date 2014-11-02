@@ -2,3 +2,7 @@ target/
 *.class
 *.jar
 dependency-reduced-pom.xml
+.classpath
+.metadata
+.project
+.settings
