@@ -1,116 +1,133 @@
 package com.monkeymusicchallenge.warmup;
 
+import java.util.Collections;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import se.daggen.common.converter.Converter;
+import se.daggen.common.graph.Edge;
+import se.daggen.common.graph.Graph;
+import se.daggen.common.map.Coordinate;
+import se.daggen.common.map.Map;
+import se.daggen.common.map.Path;
+import se.daggen.monkeymusicchallange.graph.ConverterMapToGraph;
+import se.daggen.monkeymusicchallange.graph.WeightFunc;
+import se.daggen.monkeymusicchallange.map.ConverterJSONtoMap;
+import se.daggen.monkeymusicchallange.map.ConverterStringToCoordinates;
+import se.daggen.monkeymusicchallange.map.Direction;
+import se.daggen.monkeymusicchallange.map.MapItem;
+import se.daggen.monkeymusicchallange.map.Moving;
+
 public class AI {
 
-  public String move(final JSONObject gameState) {
+	private Optional<Map<MapItem, Integer>> map = Optional.empty();
+	private Converter<String, Coordinate<Integer>> converterStringToCoordinate = new ConverterStringToCoordinates();
+	private Optional<Graph<Coordinate<Integer>, Path<Integer>, Coordinate<Integer>>> graph = Optional
+			.empty();
+	private LinkedList<Edge<Coordinate<Integer>, Path<Integer>, Coordinate<Integer>>> edges;
+	private Optional<Edge<Coordinate<Integer>, Path<Integer>, Coordinate<Integer>>> currentEdge = Optional
+			.empty();
+	private List<Coordinate<Integer>> currentPath;
+	private JSONObject gameState;
 
-    // Every game has a limited number of turns. Use every turn wisely!
-    final int remainingNumberOfTurns = gameState.getInt("turns");
+	public String move(final JSONObject gameState) {
+		this.gameState = gameState;
 
-    // The level layout is a 2D-matrix (an array of arrays).
-    //
-    // Every element in the matrix is a string. The string tells you what's
-    // located at the corresponding position on the level.
-    //
-    // In the warmup challenge, your objective is to find all music items
-    // and deliver them to the eagerly waiting Spotify user.
-    //
-    // "empty": an empty tile, you can move here
-    // "monkey": your monkey, this is where you're currently at
-    // "song" / "album" / "playlist": a music item, go get them!
-    // "user": go here once you've picked up all music items
-    //
-    // Too easy for you? Good...
-    //
-    // The real fun begins when the warmup is over and the competition begins!
-    final JSONArray currentLevelLayout = gameState.getJSONArray("layout");
+		if (!map.isPresent())
+			loadMapAndGraph();
 
-    // This is an array of all music items you've currently picked up
-    final JSONArray pickedUpMusicItems = gameState.getJSONArray("pickedUp");
+		String move = move();
+		System.out.println(getMonkeysPosition());
+		System.out.println(move);
+		return move;
+	}
 
-    // The position attribute tells you where your monkey is
-    final JSONArray currentPositionOfMonkey = gameState.getJSONArray("position");
+	private void loadMapAndGraph() {
+		final JSONArray currentLevelLayout = gameState.getJSONArray("layout");
+		map = Optional.of(new ConverterJSONtoMap().convert(currentLevelLayout));
+		graph = Optional.of(new ConverterMapToGraph().convert(map.get()));
 
-    // Speaking of positions...
-    //
-    // X and Y coordinates can be confusing.
-    // Which way is up and which way is down?
-    //
-    // Here is an example explaining how coordinates work in
-    // Monkey Music Challenge:
-    //
-    // {
-    //   "layout": [["empty", "monkey"]
-    //              ["song",  "empty"]]
-    //   "position": [0, 1],
-    //   ...
-    // }
-    //
-    // The "position" attribute tells you the location of your monkey
-    // in the "layout" matrix. In this example, you're at layout[0][1].
-    //
-    // If you send { "command": "move", "direction": "down", ... }
-    // to the server, you'll get back:
-    //
-    // {
-    //   "layout": [["empty", "empty"]
-    //              ["song",  "monkey"]]
-    //   "position": [1, 1]
-    // }
-    //
-    // If you instead send { "command": "move", "direction": "left", ... }
-    // to the server, you'll get back:
-    //
-    // {
-    //   "layout": [["monkey", "empty"]
-    //              ["song",   "empty"]]
-    //   "position": [0, 0]
-    // }
-    //
-    // So what about picking stuff up then?
-    //
-    // It's simple!
-    //
-    // Just stand next to something you want to pick up and move towards it.
-    //
-    // For example, say our current game state looks like this:
-    //
-    // {
-    //   "layout": [["empty", "empty"]
-    //              ["song",  "monkey"]]
-    //   "position": [1, 1],
-    //   "pickedUp": []
-    // }
-    //
-    // When you send { "command": "move", "direction": "left", ... }
-    // to the server, you'll get back:
-    //
-    //   "layout": [["empty",  "empty"]
-    //              ["empty",  "monkey"]]
-    //   "position": [1, 1],
-    //   "pickedUp": ["song"],
-    //   ...
-    // }
-    //
-    // Instead of moving, your monkey successfully picked up the song!
-    //
-    // Got it? Sweet! This message will self destruct in five seconds...
+		Optional<LinkedList<Edge<Coordinate<Integer>, Path<Integer>, Coordinate<Integer>>>> e = graph
+				.get().getShortestPathWhichVisitAllRegions(
+						getMonkeysPosition(), Coordinate.ofArgs(0, 0),
+						WeightFunc.FUNC);
+		edges = e.get();
+	}
 
-    // This will always return the string "monkey" - get it?
-    final String monkey = currentLevelLayout
-        .getJSONArray(currentPositionOfMonkey.getInt(0))
-        .getString(currentPositionOfMonkey.getInt(1));
+	private Coordinate<Integer> getMonkeysPosition() {
+		final JSONArray currentPositionOfMonkey = gameState
+				.getJSONArray("position");
+		return converterStringToCoordinate.convert(currentPositionOfMonkey
+				.toString());
+	}
 
-    // TODO: You may want to do something smarter here
-    return this.randomDirection();
-  }
+	private String move() {
 
-  private String randomDirection() {
-    return new String[] {"up", "down", "left", "right"}[ThreadLocalRandom.current().nextInt(4)];
-  }
+		Optional<Coordinate<Integer>> closest = pickClosestItem();
+		if (closest.isPresent()) {
+			map.get().set(MapItem.EMPTY, closest.get());
+			System.out.println("Picking points!");
+			return Direction.getFirstDirection(getMonkeysPosition(),
+					closest.get()).getName();
+		}
+
+		if (!currentEdge.isPresent()) {
+			loadNextEdage();
+		}
+
+		if (currentPath.size() > 1) {
+			Direction direction = getNextDirection();
+			return direction.getName();
+		} else
+			return randomDirection();
+	}
+
+	private Optional<Coordinate<Integer>> pickClosestItem() {
+		List<Coordinate<Integer>> possiblePossitions = Moving.FUNC.apply(getMonkeysPosition());
+
+		return map.get().getAll(MapItem.NICE_ITEMS).parallelStream()
+				.filter(item -> possiblePossitions.contains(item)).findAny();
+	}
+
+	private void loadNextEdage() {
+		if (!edges.isEmpty())
+			currentEdge = Optional.of(edges.removeFirst());
+		else 
+			currentEdge = Optional.empty();
+		
+		if (currentEdge.isPresent())
+			loadNextPath();
+	}
+
+	private void loadNextPath() {
+		currentPath = currentEdge.get().getContent().getSteps();
+		Coordinate<Integer> monkeyPos = getMonkeysPosition();
+
+		if (currentPath.get(currentPath.size() - 1).equals(monkeyPos)) {
+			Collections.reverse(currentPath);
+		}
+
+		assert currentPath.get(0).equals(monkeyPos);
+	}
+
+	private Direction getNextDirection() {
+		Direction nextDirection = Direction.getFirstDirection(
+				currentPath.get(0), currentPath.get(1));
+		currentPath.remove(0);
+		if (currentPath.size() < 2)
+			currentEdge = Optional.empty();
+
+		return nextDirection;
+	}
+
+	private String randomDirection() {
+		System.out.print("Random: ");
+		return new String[] { "up", "down", "left", "right" }[ThreadLocalRandom
+				.current().nextInt(1)];
+	}
 }
